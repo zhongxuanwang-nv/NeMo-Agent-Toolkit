@@ -1,0 +1,9 @@
+llms:
+  main:
+    _type: nat_test_llm
+    response_seq: [alpha, beta, gamma]
+    delay_ms: 0
+workflow:
+  _type: chat_completion
+  llm_name: main
+  system_prompt: "Say only the answer."
