@@ -102,6 +102,17 @@ class FunctionRef(ComponentRef):
         return ComponentGroup.FUNCTIONS
 
 
+class FunctionGroupRef(ComponentRef):
+    """
+    A reference to a function group in a NAT configuration object.
+    """
+
+    @property
+    @override
+    def component_group(self):
+        return ComponentGroup.FUNCTION_GROUPS
+
+
 class LLMRef(ComponentRef):
     """
     A reference to an LLM in a NAT configuration object.
@@ -166,3 +177,14 @@ class TTCStrategyRef(ComponentRef):
     @override
     def component_group(self):
         return ComponentGroup.TTC_STRATEGIES
+
+
+class MiddlewareRef(ComponentRef):
+    """
+    A reference to middleware in a NAT configuration object.
+    """
+
+    @property
+    @override
+    def component_group(self):
+        return ComponentGroup.MIDDLEWARE

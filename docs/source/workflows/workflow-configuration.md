@@ -95,15 +95,10 @@ This section ties the previous sections together by defining the tools and LLM m
 The `_type` value refers to the workflow type, in our example we are using a `react_agent` workflow. You can also use the workflow type, `tool_calling_agent`. The parameters for each are specified by the {py:class}`~nat.agent.react_agent.register.ReActAgentWorkflowConfig` and {py:class}`~nat.agent.tool_calling_agent.register.ToolCallAgentWorkflowConfig` classes respectively.
 
 ### `general`
-This section contains general configuration settings for AngentIQ which are not specific to any workflow. The parameters for this section are specified by the {py:class}`~nat.data_models.config.GeneralConfig` class.
+This section contains general configuration settings for NeMo Agent toolkit which are not specific to any workflow. The parameters for this section are specified by the {py:class}`~nat.data_models.config.GeneralConfig` class.
 
 :::{note}
-The `use_uvloop` parameter which specifies whether to use the [`uvloop`](https://github.com/MagicStack/uvloop) event loop. This is set to `true` by default, and can provide a significant speedup in some cases, however this can also make it difficult to debug workflow issues. For debugging purposes it is recommended to set this to `false`:
-
-```yaml
-general:
-  use_uvloop: false
-```
+⚠️ **Deprecated**: The `use_uvloop` parameter is deprecated and will be removed in a future release. Previously, the `use_uvloop` parameter meant to specify whether to use the [`uvloop`](https://github.com/MagicStack/uvloop) event loop, but now the use of `uv_loop` will be automatically determined based on the system platform the user is using.
 :::
 
 ### `eval`
@@ -144,3 +139,34 @@ The environment variable interpolation process follow the rules enumerated below
 - `${VAR}` - Uses the value of environment variable `VAR`, or empty string if not set
 - `${VAR:-default}` - Uses the value of environment variable `VAR`, or `default` if not set
 - `${VAR:-}` - Uses the value of environment variable `VAR`, or empty string if not set
+
+### Configuration Inheritance
+
+NeMo Agent toolkit supports configuration inheritance to reduce duplication across similar configuration files. Use the `base` key to reference a base configuration and selectively override specific values. For example, given a base configuration:
+
+```yaml
+# base-config.yml
+llms:
+  nim_llm:
+    model_name: meta/llama-3.1-70b-instruct
+    temperature: 0.0
+    max_tokens: 1024
+```
+
+A variant configuration can inherit from it and override specific values:
+
+```yaml
+# config-variant.yml
+base: base-config.yml
+llms:
+  nim_llm:
+    temperature: 0.9  # Override specific value
+```
+
+When you run a workflow using `config-variant.yml`, the configurations are combined so that values in the variant (such as `temperature: 0.9`) override those in the base, while unspecified values (such as `model_name` and `max_tokens`) are inherited. This feature also supports:
+
+- **Relative or absolute paths**: Base paths are resolved relative to the current configuration file's directory
+- **Chained inheritance**: Configurations can inherit from other variants (such as `base.yml` → `variant.yml` → `variant-debug.yml`)
+- **Error detection**: The system detects circular dependencies and missing base files
+
+See `examples/config_inheritance` for a complete example demonstrating different inheritance patterns and use cases.

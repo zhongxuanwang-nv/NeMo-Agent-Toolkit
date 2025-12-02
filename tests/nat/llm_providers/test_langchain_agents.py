@@ -30,7 +30,7 @@ from nat.llm.openai_llm import OpenAIModelConfig
 @pytest.mark.usefixtures("nvidia_api_key")
 async def test_nim_langchain_agent():
     """
-    Test NIM LLM with LangChain agent. Requires NVIDIA_API_KEY to be set.
+    Test NIM LLM with LangChain/LangGraph agent. Requires NVIDIA_API_KEY to be set.
     """
 
     prompt = ChatPromptTemplate.from_messages([("system", "You are a helpful AI assistant."), ("human", "{input}")])
@@ -54,7 +54,7 @@ async def test_nim_langchain_agent():
 @pytest.mark.usefixtures("openai_api_key")
 async def test_openai_langchain_agent():
     """
-    Test OpenAI LLM with LangChain agent. Requires OPENAI_API_KEY to be set.
+    Test OpenAI LLM with LangChain/LangGraph agent. Requires OPENAI_API_KEY to be set.
     """
     prompt = ChatPromptTemplate.from_messages([("system", "You are a helpful AI assistant."), ("human", "{input}")])
 
@@ -77,7 +77,7 @@ async def test_openai_langchain_agent():
 @pytest.mark.usefixtures("aws_keys")
 async def test_aws_bedrock_langchain_agent():
     """
-    Test AWS Bedrock LLM with LangChain agent.
+    Test AWS Bedrock LLM with LangChain/LangGraph agent.
     Requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY to be set.
     See https://docs.aws.amazon.com/bedrock/latest/userguide/setting-up.html for more information.
     """
@@ -103,16 +103,20 @@ async def test_aws_bedrock_langchain_agent():
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("azure_openai_keys")
-async def test_azure_openai_langchain_agent():
+@pytest.mark.parametrize("api_version", [None, '2025-04-01-preview'])
+async def test_azure_openai_langchain_agent(api_version: str | None):
     """
-    Test Azure OpenAI LLM with LangChain agent.
+    Test Azure OpenAI LLM with LangChain/LangGraph agent.
     Requires AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT to be set.
     The model can be changed by setting AZURE_OPENAI_DEPLOYMENT.
     See https://learn.microsoft.com/en-us/azure/ai-foundry/openai/quickstart for more information.
     """
     prompt = ChatPromptTemplate.from_messages([("system", "You are a helpful AI assistant."), ("human", "{input}")])
 
-    llm_config = AzureOpenAIModelConfig(azure_deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1"))
+    config_args = {"azure_deployment": os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1")}
+    if api_version is not None:
+        config_args["api_version"] = api_version
+    llm_config = AzureOpenAIModelConfig(**config_args)
 
     async with WorkflowBuilder() as builder:
         await builder.add_llm("azure_openai_llm", llm_config)
@@ -125,3 +129,12 @@ async def test_azure_openai_langchain_agent():
         assert response.content is not None
         assert isinstance(response.content, str)
         assert "3" in response.content.lower()
+
+
+@pytest.mark.integration
+@pytest.mark.usefixtures("azure_openai_keys")
+async def test_azure_openai_react_e2e(test_data_dir: str):
+    from nat.test.utils import run_workflow
+
+    config_file = os.path.join(test_data_dir, "azure_openai_e2e.yaml")
+    await run_workflow(config_file=config_file, question="What is 1+2?", expected_answer="3")

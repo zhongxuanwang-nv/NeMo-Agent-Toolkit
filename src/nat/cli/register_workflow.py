@@ -27,6 +27,8 @@ from nat.cli.type_registry import EvaluatorRegisteredCallableT
 from nat.cli.type_registry import FrontEndBuildCallableT
 from nat.cli.type_registry import FrontEndRegisteredCallableT
 from nat.cli.type_registry import FunctionBuildCallableT
+from nat.cli.type_registry import FunctionGroupBuildCallableT
+from nat.cli.type_registry import FunctionGroupRegisteredCallableT
 from nat.cli.type_registry import FunctionRegisteredCallableT
 from nat.cli.type_registry import LLMClientBuildCallableT
 from nat.cli.type_registry import LLMClientRegisteredCallableT
@@ -36,6 +38,8 @@ from nat.cli.type_registry import LoggingMethodConfigT
 from nat.cli.type_registry import LoggingMethodRegisteredCallableT
 from nat.cli.type_registry import MemoryBuildCallableT
 from nat.cli.type_registry import MemoryRegisteredCallableT
+from nat.cli.type_registry import MiddlewareBuildCallableT
+from nat.cli.type_registry import MiddlewareRegisteredCallableT
 from nat.cli.type_registry import ObjectStoreBuildCallableT
 from nat.cli.type_registry import ObjectStoreRegisteredCallableT
 from nat.cli.type_registry import RegisteredLoggingMethod
@@ -60,8 +64,10 @@ from nat.data_models.embedder import EmbedderBaseConfigT
 from nat.data_models.evaluator import EvaluatorBaseConfigT
 from nat.data_models.front_end import FrontEndConfigT
 from nat.data_models.function import FunctionConfigT
+from nat.data_models.function import FunctionGroupConfigT
 from nat.data_models.llm import LLMBaseConfigT
 from nat.data_models.memory import MemoryBaseConfigT
+from nat.data_models.middleware import MiddlewareBaseConfigT
 from nat.data_models.object_store import ObjectStoreBaseConfigT
 from nat.data_models.registry_handler import RegistryHandlerBaseConfigT
 from nat.data_models.retriever import RetrieverBaseConfigT
@@ -146,6 +152,10 @@ def register_function(config_type: type[FunctionConfigT],
                       framework_wrappers: list[LLMFrameworkEnum | str] | None = None):
     """
     Register a workflow with optional framework_wrappers for automatic profiler hooking.
+
+    Args:
+        config_type: The function configuration type
+        framework_wrappers: Optional list of framework wrappers for automatic profiler hooking
     """
 
     def register_function_inner(
@@ -155,10 +165,7 @@ def register_function(config_type: type[FunctionConfigT],
 
         context_manager_fn = asynccontextmanager(fn)
 
-        if framework_wrappers is None:
-            framework_wrappers_list: list[str] = []
-        else:
-            framework_wrappers_list = list(framework_wrappers)
+        framework_wrappers_list = list(framework_wrappers or [])
 
         discovery_metadata = DiscoveryMetadata.from_config_type(config_type=config_type,
                                                                 component_type=ComponentEnum.FUNCTION)
@@ -175,6 +182,83 @@ def register_function(config_type: type[FunctionConfigT],
         return context_manager_fn
 
     return register_function_inner
+
+
+def register_function_group(config_type: type[FunctionGroupConfigT],
+                            framework_wrappers: list[LLMFrameworkEnum | str] | None = None):
+    """
+    Register a function group with optional framework_wrappers for automatic profiler hooking.
+    Function groups share configuration/resources across multiple functions.
+    """
+
+    def register_function_group_inner(
+        fn: FunctionGroupBuildCallableT[FunctionGroupConfigT]
+    ) -> FunctionGroupRegisteredCallableT[FunctionGroupConfigT]:
+        from .type_registry import GlobalTypeRegistry
+        from .type_registry import RegisteredFunctionGroupInfo
+
+        context_manager_fn = asynccontextmanager(fn)
+
+        framework_wrappers_list = list(framework_wrappers or [])
+
+        discovery_metadata = DiscoveryMetadata.from_config_type(config_type=config_type,
+                                                                component_type=ComponentEnum.FUNCTION_GROUP)
+
+        GlobalTypeRegistry.get().register_function_group(
+            RegisteredFunctionGroupInfo(
+                full_type=config_type.full_type,
+                config_type=config_type,
+                build_fn=context_manager_fn,
+                framework_wrappers=framework_wrappers_list,
+                discovery_metadata=discovery_metadata,
+            ))
+
+        return context_manager_fn
+
+    return register_function_group_inner
+
+
+def register_middleware(config_type: type[MiddlewareBaseConfigT]):
+    """
+    Register a middleware component.
+
+    Middleware provides middleware-style wrapping of calls with
+    preprocessing and postprocessing logic. They are built as components that can
+    be configured in YAML and referenced by name in configurations.
+
+    Args:
+        config_type: The middleware configuration type to register
+
+    Returns:
+        A decorator that wraps the build function as an async context manager
+    """
+
+    def register_middleware_inner(
+            fn: MiddlewareBuildCallableT[MiddlewareBaseConfigT]
+    ) -> MiddlewareRegisteredCallableT[MiddlewareBaseConfigT]:
+        from .type_registry import GlobalTypeRegistry
+        from .type_registry import RegisteredMiddlewareInfo
+
+        context_manager_fn = asynccontextmanager(fn)
+
+        discovery_metadata = DiscoveryMetadata.from_config_type(config_type=config_type,
+                                                                component_type=ComponentEnum.MIDDLEWARE)
+
+        GlobalTypeRegistry.get().register_middleware(
+            RegisteredMiddlewareInfo(
+                full_type=config_type.full_type,
+                config_type=config_type,
+                build_fn=context_manager_fn,
+                discovery_metadata=discovery_metadata,
+            ))
+
+        return context_manager_fn
+
+    return register_middleware_inner
+
+
+# Compatibility alias for backwards compatibility
+register_function_middleware = register_middleware
 
 
 def register_llm_provider(config_type: type[LLMBaseConfigT]):

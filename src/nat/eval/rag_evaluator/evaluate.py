@@ -15,14 +15,10 @@
 
 import logging
 import math
+import typing
 from collections.abc import Sequence
 
 from pydantic import BaseModel
-from ragas import EvaluationDataset
-from ragas import SingleTurnSample
-from ragas.dataset_schema import EvaluationResult
-from ragas.llms import LangchainLLMWrapper
-from ragas.metrics import Metric
 from tqdm import tqdm
 
 from nat.data_models.intermediate_step import IntermediateStepType
@@ -32,14 +28,22 @@ from nat.eval.evaluator.evaluator_model import EvalOutput
 from nat.eval.evaluator.evaluator_model import EvalOutputItem
 from nat.eval.utils.tqdm_position_registry import TqdmPositionRegistry
 
+if typing.TYPE_CHECKING:
+    # We are lazily importing ragas to avoid import-time side effects such as applying the nest_asyncio patch, which is
+    # not compatible with Python 3.12+, we want to ensure that we are able to apply the nest_asyncio2 patch instead.
+    from ragas import EvaluationDataset
+    from ragas.dataset_schema import EvaluationResult
+    from ragas.llms import LangchainLLMWrapper
+    from ragas.metrics import Metric
+
 logger = logging.getLogger(__name__)
 
 
 class RAGEvaluator:
 
     def __init__(self,
-                 evaluator_llm: LangchainLLMWrapper,
-                 metrics: Sequence[Metric],
+                 evaluator_llm: "LangchainLLMWrapper",
+                 metrics: Sequence["Metric"],
                  max_concurrency=8,
                  input_obj_field: str | None = None):
         self.evaluator_llm = evaluator_llm
@@ -66,8 +70,11 @@ class RAGEvaluator:
 
         return str(input_obj)  # Fallback to string representation of the dict
 
-    def eval_input_to_ragas(self, eval_input: EvalInput) -> EvaluationDataset:
+    def eval_input_to_ragas(self, eval_input: EvalInput) -> "EvaluationDataset":
         """Converts EvalInput into a Ragas-compatible EvaluationDataset."""
+        from ragas import EvaluationDataset
+        from ragas import SingleTurnSample
+
         from nat.eval.intermediate_step_adapter import IntermediateStepAdapter
         event_filter = [IntermediateStepType.TOOL_END, IntermediateStepType.LLM_END, IntermediateStepType.CUSTOM_END]
         samples = []
@@ -98,7 +105,7 @@ class RAGEvaluator:
 
         return EvaluationDataset(samples=samples)
 
-    def ragas_to_eval_output(self, eval_input: EvalInput, results_dataset: EvaluationResult | None) -> EvalOutput:
+    def ragas_to_eval_output(self, eval_input: EvalInput, results_dataset: "EvaluationResult | None") -> EvalOutput:
         """Converts the ragas EvaluationResult to nat EvalOutput"""
 
         if not results_dataset:
@@ -116,11 +123,14 @@ class RAGEvaluator:
             """Convert NaN or None to 0.0 for safe arithmetic/serialization."""
             return 0.0 if v is None or (isinstance(v, float) and math.isnan(v)) else v
 
-        # Convert from list of dicts to dict of lists, coercing NaN/None to 0.0
+        # Keep original scores (preserving NaN/None) for output
+        original_scores_dict = {metric: [score.get(metric) for score in scores] for metric in scores[0]}
+
+        # Convert from list of dicts to dict of lists, coercing NaN/None to 0.0 for average calculation
         scores_dict = {metric: [_nan_to_zero(score.get(metric)) for score in scores] for metric in scores[0]}
         first_metric_name = list(scores_dict.keys())[0] if scores_dict else None
 
-        # Compute the average of each metric, guarding against empty lists
+        # Compute the average of each metric using cleaned scores (NaN/None -> 0.0)
         average_scores = {
             metric: (sum(values) / len(values) if values else 0.0)
             for metric, values in scores_dict.items()
@@ -137,11 +147,11 @@ class RAGEvaluator:
         else:
             ids = df["user_input"].tolist()  # Use "user_input" as ID fallback
 
-        # Construct EvalOutputItem list
+        # Construct EvalOutputItem list using original scores (preserving NaN/None)
         eval_output_items = [
             EvalOutputItem(
                 id=ids[i],
-                score=_nan_to_zero(getattr(row, first_metric_name, 0.0) if first_metric_name else 0.0),
+                score=original_scores_dict[first_metric_name][i] if first_metric_name else None,
                 reasoning={
                     key:
                         getattr(row, key, None)  # Use getattr to safely access attributes

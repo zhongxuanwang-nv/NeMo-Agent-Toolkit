@@ -139,8 +139,10 @@ class MessageValidator:
                     text_content: str = str(data_model.payload)
                 validated_message_content = SystemResponseContent(text=text_content)
 
-            elif (isinstance(data_model, (ChatResponse, ChatResponseChunk))):
+            elif isinstance(data_model, ChatResponse):
                 validated_message_content = SystemResponseContent(text=data_model.choices[0].message.content)
+            elif isinstance(data_model, ChatResponseChunk):
+                validated_message_content = SystemResponseContent(text=data_model.choices[0].delta.content)
 
             elif (isinstance(data_model, ResponseIntermediateStep)):
                 validated_message_content = SystemIntermediateStepContent(name=data_model.name,
@@ -204,7 +206,7 @@ class MessageValidator:
 
         validated_message_type: str = ""
         try:
-            if (isinstance(data_model, (ResponsePayloadOutput, ChatResponse, ChatResponseChunk))):
+            if (isinstance(data_model, ResponsePayloadOutput | ChatResponse | ChatResponseChunk)):
                 validated_message_type = WebSocketMessageType.RESPONSE_MESSAGE
 
             elif (isinstance(data_model, ResponseIntermediateStep)):
@@ -238,10 +240,9 @@ class MessageValidator:
         thread_id: str = "default",
         parent_id: str = "default",
         conversation_id: str | None = None,
-        content: SystemResponseContent
-        | Error = SystemResponseContent(),
+        content: SystemResponseContent | Error = SystemResponseContent(),
         status: WebSocketMessageStatus = WebSocketMessageStatus.IN_PROGRESS,
-        timestamp: str = str(datetime.datetime.now(datetime.timezone.utc))
+        timestamp: str = str(datetime.datetime.now(datetime.UTC))
     ) -> WebSocketSystemResponseTokenMessage | None:
         """
         Creates a system response token message with default values.
@@ -280,7 +281,7 @@ class MessageValidator:
         conversation_id: str | None = None,
         content: SystemIntermediateStepContent = SystemIntermediateStepContent(name="default", payload="default"),
         status: WebSocketMessageStatus = WebSocketMessageStatus.IN_PROGRESS,
-        timestamp: str = str(datetime.datetime.now(datetime.timezone.utc))
+        timestamp: str = str(datetime.datetime.now(datetime.UTC))
     ) -> WebSocketSystemIntermediateStepMessage | None:
         """
         Creates a system intermediate step message with default values.
@@ -320,7 +321,7 @@ class MessageValidator:
         conversation_id: str | None = None,
         content: HumanPrompt,
         status: WebSocketMessageStatus = WebSocketMessageStatus.IN_PROGRESS,
-        timestamp: str = str(datetime.datetime.now(datetime.timezone.utc))
+        timestamp: str = str(datetime.datetime.now(datetime.UTC))
     ) -> WebSocketSystemInteractionMessage | None:
         """
         Creates a system interaction message with default values.

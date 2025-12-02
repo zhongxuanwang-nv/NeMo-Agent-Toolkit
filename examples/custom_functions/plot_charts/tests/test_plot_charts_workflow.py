@@ -13,32 +13,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import importlib
-import importlib.resources
-import inspect
-import logging
+import glob
 from pathlib import Path
 
 import pytest
 
-from nat.runtime.loader import load_workflow
-from nat_plot_charts.register import PlotChartsWorkflowConfig
 
-logger = logging.getLogger(__name__)
+@pytest.mark.integration
+@pytest.mark.usefixtures("nvidia_api_key")
+async def test_full_workflow(tmp_path: Path):
+    from nat.runtime.loader import load_config
+    from nat.test.utils import locate_example_config
+    from nat.test.utils import run_workflow
+    from nat_plot_charts.register import PlotChartsWorkflowConfig
 
+    config_file = locate_example_config(PlotChartsWorkflowConfig)
+    config = load_config(config_file)
+    config.workflow.output_directory = str(tmp_path.absolute())
 
-@pytest.mark.e2e
-async def test_full_workflow():
+    await run_workflow(config=config,
+                       question="make a line chart for me",
+                       expected_answer="successfully created line chart")
 
-    package_name = inspect.getmodule(PlotChartsWorkflowConfig).__package__
-
-    config_file: Path = importlib.resources.files(package_name).joinpath("configs", "config.yml").absolute()
-
-    async with load_workflow(config_file) as workflow:
-
-        async with workflow.run("make a line chart for me") as runner:
-
-            result = await runner.result(to_type=str)
-
-        result = result.lower()
-        assert "saved output to" in result
+    # Verify that a PNG file was created in the output directory
+    image_files = glob.glob(str(tmp_path / "*.png"))
+    assert len(image_files) == 1

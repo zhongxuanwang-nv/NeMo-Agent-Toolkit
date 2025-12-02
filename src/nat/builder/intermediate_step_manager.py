@@ -16,6 +16,8 @@
 import dataclasses
 import logging
 import typing
+import weakref
+from typing import ClassVar
 
 from nat.data_models.intermediate_step import IntermediateStep
 from nat.data_models.intermediate_step import IntermediateStepPayload
@@ -46,10 +48,18 @@ class IntermediateStepManager:
     Manages updates to the NAT Event Stream for intermediate steps
     """
 
+    # Class-level tracking for debugging and monitoring
+    _instance_count: ClassVar[int] = 0
+    _active_instances: ClassVar[set[weakref.ref]] = set()
+
     def __init__(self, context_state: "ContextState"):  # noqa: F821
         self._context_state = context_state
 
         self._outstanding_start_steps: dict[str, OpenStep] = {}
+
+        # Track instance creation
+        IntermediateStepManager._instance_count += 1
+        IntermediateStepManager._active_instances.add(weakref.ref(self, self._cleanup_instance_tracking))
 
     def push_intermediate_step(self, payload: IntermediateStepPayload) -> None:
         """
@@ -91,7 +101,10 @@ class IntermediateStepManager:
             open_step = self._outstanding_start_steps.pop(payload.UUID, None)
 
             if (open_step is None):
-                logger.warning("Step id %s not found in outstanding start steps", payload.UUID)
+                logger.warning(
+                    "Step id %s not found in outstanding start steps. "
+                    "This may occur if the step was started in a different context or already completed.",
+                    payload.UUID)
                 return
 
             parent_step_id = open_step.step_parent_id
@@ -147,7 +160,8 @@ class IntermediateStepManager:
             if (open_step is None):
                 logger.warning(
                     "Created a chunk for step %s, but no matching start step was found. "
-                    "Chunks must be created with the same ID as the start step.",
+                    "Chunks must be created with the same ID as the start step. "
+                    "This may occur if the step was started in a different context.",
                     payload.UUID)
                 return
 
@@ -172,3 +186,25 @@ class IntermediateStepManager:
         """
 
         return self._context_state.event_stream.get().subscribe(on_next, on_error, on_complete)
+
+    @classmethod
+    def _cleanup_instance_tracking(cls, ref: weakref.ref) -> None:
+        """Cleanup callback for weakref when instance is garbage collected."""
+        cls._active_instances.discard(ref)
+
+    @classmethod
+    def get_active_instance_count(cls) -> int:
+        """Get the number of active IntermediateStepManager instances.
+
+        Returns:
+            int: Number of active instances (cleaned up automatically via weakref)
+        """
+        return len(cls._active_instances)
+
+    def get_outstanding_step_count(self) -> int:
+        """Get the number of outstanding (started but not ended) steps.
+
+        Returns:
+            int: Number of steps that have been started but not yet ended
+        """
+        return len(self._outstanding_start_steps)

@@ -37,6 +37,7 @@ from nat.builder.embedder import EmbedderProviderInfo
 from nat.builder.evaluator import EvaluatorInfo
 from nat.builder.front_end import FrontEndBase
 from nat.builder.function import Function
+from nat.builder.function import FunctionGroup
 from nat.builder.function_base import FunctionBase
 from nat.builder.function_info import FunctionInfo
 from nat.builder.llm import LLMProviderInfo
@@ -55,12 +56,16 @@ from nat.data_models.front_end import FrontEndBaseConfig
 from nat.data_models.front_end import FrontEndConfigT
 from nat.data_models.function import FunctionBaseConfig
 from nat.data_models.function import FunctionConfigT
+from nat.data_models.function import FunctionGroupBaseConfig
+from nat.data_models.function import FunctionGroupConfigT
 from nat.data_models.llm import LLMBaseConfig
 from nat.data_models.llm import LLMBaseConfigT
 from nat.data_models.logging import LoggingBaseConfig
 from nat.data_models.logging import LoggingMethodConfigT
 from nat.data_models.memory import MemoryBaseConfig
 from nat.data_models.memory import MemoryBaseConfigT
+from nat.data_models.middleware import MiddlewareBaseConfig
+from nat.data_models.middleware import MiddlewareBaseConfigT
 from nat.data_models.object_store import ObjectStoreBaseConfig
 from nat.data_models.object_store import ObjectStoreBaseConfigT
 from nat.data_models.registry_handler import RegistryHandlerBaseConfig
@@ -73,6 +78,7 @@ from nat.data_models.ttc_strategy import TTCStrategyBaseConfig
 from nat.data_models.ttc_strategy import TTCStrategyBaseConfigT
 from nat.experimental.test_time_compute.models.strategy_base import StrategyBase
 from nat.memory.interfaces import MemoryEditor
+from nat.middleware.middleware import Middleware
 from nat.object_store.interfaces import ObjectStore
 from nat.observability.exporter.base_exporter import BaseExporter
 from nat.registry_handlers.registry_handler_base import AbstractRegistryHandler
@@ -85,6 +91,8 @@ EmbedderProviderBuildCallableT = Callable[[EmbedderBaseConfigT, Builder], AsyncI
 EvaluatorBuildCallableT = Callable[[EvaluatorBaseConfigT, EvalBuilder], AsyncIterator[EvaluatorInfo]]
 FrontEndBuildCallableT = Callable[[FrontEndConfigT, Config], AsyncIterator[FrontEndBase]]
 FunctionBuildCallableT = Callable[[FunctionConfigT, Builder], AsyncIterator[FunctionInfo | Callable | FunctionBase]]
+FunctionGroupBuildCallableT = Callable[[FunctionGroupConfigT, Builder], AsyncIterator[FunctionGroup]]
+MiddlewareBuildCallableT = Callable[[MiddlewareBaseConfigT, Builder], AsyncIterator[Middleware]]
 TTCStrategyBuildCallableT = Callable[[TTCStrategyBaseConfigT, Builder], AsyncIterator[StrategyBase]]
 LLMClientBuildCallableT = Callable[[LLMBaseConfigT, Builder], AsyncIterator[typing.Any]]
 LLMProviderBuildCallableT = Callable[[LLMBaseConfigT, Builder], AsyncIterator[LLMProviderInfo]]
@@ -106,6 +114,8 @@ EvaluatorRegisteredCallableT = Callable[[EvaluatorBaseConfigT, EvalBuilder], Abs
 FrontEndRegisteredCallableT = Callable[[FrontEndConfigT, Config], AbstractAsyncContextManager[FrontEndBase]]
 FunctionRegisteredCallableT = Callable[[FunctionConfigT, Builder],
                                        AbstractAsyncContextManager[FunctionInfo | Callable | FunctionBase]]
+FunctionGroupRegisteredCallableT = Callable[[FunctionGroupConfigT, Builder], AbstractAsyncContextManager[FunctionGroup]]
+MiddlewareRegisteredCallableT = Callable[[MiddlewareBaseConfigT, Builder], AbstractAsyncContextManager[Middleware]]
 TTCStrategyRegisterCallableT = Callable[[TTCStrategyBaseConfigT, Builder], AbstractAsyncContextManager[StrategyBase]]
 LLMClientRegisteredCallableT = Callable[[LLMBaseConfigT, Builder], AbstractAsyncContextManager[typing.Any]]
 LLMProviderRegisteredCallableT = Callable[[LLMBaseConfigT, Builder], AbstractAsyncContextManager[LLMProviderInfo]]
@@ -174,8 +184,29 @@ class RegisteredFunctionInfo(RegisteredInfo[FunctionBaseConfig]):
     and a description.
     """
 
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
     build_fn: FunctionRegisteredCallableT = Field(repr=False)
     framework_wrappers: list[str] = Field(default_factory=list)
+
+
+class RegisteredFunctionGroupInfo(RegisteredInfo[FunctionGroupBaseConfig]):
+    """
+    Represents a registered function group. Function groups are collections of functions that share configuration
+    and resources.
+    """
+
+    build_fn: FunctionGroupRegisteredCallableT = Field(repr=False)
+    framework_wrappers: list[str] = Field(default_factory=list)
+
+
+class RegisteredMiddlewareInfo(RegisteredInfo[MiddlewareBaseConfig]):
+    """
+    Represents registered middleware. Middleware provides middleware-style wrapping of
+    calls with preprocessing and postprocessing logic.
+    """
+
+    build_fn: MiddlewareRegisteredCallableT = Field(repr=False)
 
 
 class RegisteredLLMProviderInfo(RegisteredInfo[LLMBaseConfig]):
@@ -312,6 +343,12 @@ class TypeRegistry:
 
         # Functions
         self._registered_functions: dict[type[FunctionBaseConfig], RegisteredFunctionInfo] = {}
+
+        # Function Groups
+        self._registered_function_groups: dict[type[FunctionGroupBaseConfig], RegisteredFunctionGroupInfo] = {}
+
+        # Middleware
+        self._registered_middleware: dict[type[MiddlewareBaseConfig], RegisteredMiddlewareInfo] = {}
 
         # LLMs
         self._registered_llm_provider_infos: dict[type[LLMBaseConfig], RegisteredLLMProviderInfo] = {}
@@ -477,6 +514,93 @@ class TypeRegistry:
     def get_registered_functions(self) -> list[RegisteredInfo[FunctionBaseConfig]]:
 
         return list(self._registered_functions.values())
+
+    def register_function_group(self, registration: RegisteredFunctionGroupInfo):
+        """Register a function group with the type registry.
+
+        Args:
+            registration: The function group registration information
+
+        Raises:
+            ValueError: If a function group with the same config type is already registered
+        """
+        if (registration.config_type in self._registered_function_groups):
+            raise ValueError(
+                f"A function group with the same config type `{registration.config_type}` has already been "
+                "registered.")
+
+        self._registered_function_groups[registration.config_type] = registration
+
+        self._registration_changed()
+
+    def get_function_group(self, config_type: type[FunctionGroupBaseConfig]) -> RegisteredFunctionGroupInfo:
+        """Get a registered function group by its config type.
+
+        Args:
+            config_type: The function group configuration type
+
+        Returns:
+            RegisteredFunctionGroupInfo: The registered function group information
+
+        Raises:
+            KeyError: If no function group is registered for the given config type
+        """
+        try:
+            return self._registered_function_groups[config_type]
+        except KeyError as err:
+            raise KeyError(f"Could not find a registered function group for config `{config_type}`. "
+                           f"Registered configs: {set(self._registered_function_groups.keys())}") from err
+
+    def get_registered_function_groups(self) -> list[RegisteredInfo[FunctionGroupBaseConfig]]:
+        """Get all registered function groups.
+
+        Returns:
+            list[RegisteredInfo[FunctionGroupBaseConfig]]: List of all registered function groups
+        """
+        return list(self._registered_function_groups.values())
+
+    def register_middleware(self, registration: RegisteredMiddlewareInfo):
+        """Register middleware with the type registry.
+
+        Args:
+            registration: The middleware registration information
+
+        Raises:
+            ValueError: If middleware with the same config type is already registered
+        """
+        if (registration.config_type in self._registered_middleware):
+            raise ValueError(f"Middleware with the same config type `{registration.config_type}` has already been "
+                             "registered.")
+
+        self._registered_middleware[registration.config_type] = registration
+
+        self._registration_changed()
+
+    def get_middleware(self, config_type: type[MiddlewareBaseConfig]) -> RegisteredMiddlewareInfo:
+        """Get registered middleware by its config type.
+
+        Args:
+            config_type: The middleware configuration type
+
+        Returns:
+            RegisteredMiddlewareInfo: The registered middleware information
+
+        Raises:
+            KeyError: If no middleware is registered for the given config type
+        """
+        try:
+            return self._registered_middleware[config_type]
+        except KeyError as err:
+            raise KeyError(f"Could not find registered middleware for config `{config_type}`. "
+                           f"Registered configs: {set(self._registered_middleware.keys())}") from err
+
+    def get_registered_middleware(self) -> list[RegisteredInfo[MiddlewareBaseConfig]]:
+        """Get all registered middleware.
+
+        Returns:
+            list[RegisteredInfo[MiddlewareBaseConfig]]: List of all registered middleware
+        """
+        return list(self._registered_middleware.values())
 
     def register_llm_provider(self, info: RegisteredLLMProviderInfo):
 
@@ -790,6 +914,9 @@ class TypeRegistry:
         if component_type == ComponentEnum.FUNCTION:
             return self._registered_functions
 
+        if component_type == ComponentEnum.FUNCTION_GROUP:
+            return self._registered_function_groups
+
         if component_type == ComponentEnum.TOOL_WRAPPER:
             return self._registered_tool_wrappers
 
@@ -847,12 +974,18 @@ class TypeRegistry:
         if component_type == ComponentEnum.TTC_STRATEGY:
             return self._registered_ttc_strategies
 
+        if component_type == ComponentEnum.MIDDLEWARE:
+            return self._registered_middleware
+
         raise ValueError(f"Supplied an unsupported component type {component_type}")
 
     def get_registered_types_by_component_type(self, component_type: ComponentEnum) -> list[str]:
 
         if component_type == ComponentEnum.FUNCTION:
             return [i.static_type() for i in self._registered_functions]
+
+        if component_type == ComponentEnum.FUNCTION_GROUP:
+            return [i.static_type() for i in self._registered_function_groups]
 
         if component_type == ComponentEnum.TOOL_WRAPPER:
             return list(self._registered_tool_wrappers)
@@ -924,7 +1057,7 @@ class TypeRegistry:
             if (short_names[key.local_name] == 1):
                 type_list.append((key.local_name, key.config_type))
 
-        return typing.Union[tuple(typing.Annotated[x_type, Tag(x_id)] for x_id, x_type in type_list)]
+        return typing.Union[*tuple(typing.Annotated[x_type, Tag(x_id)] for x_id, x_type in type_list)]
 
     def compute_annotation(self, cls: type[TypedBaseModelT]):
 
@@ -942,6 +1075,9 @@ class TypeRegistry:
 
         if issubclass(cls, FunctionBaseConfig):
             return self._do_compute_annotation(cls, self.get_registered_functions())
+
+        if issubclass(cls, FunctionGroupBaseConfig):
+            return self._do_compute_annotation(cls, self.get_registered_function_groups())
 
         if issubclass(cls, LLMBaseConfig):
             return self._do_compute_annotation(cls, self.get_registered_llm_providers())
@@ -966,6 +1102,9 @@ class TypeRegistry:
 
         if issubclass(cls, TTCStrategyBaseConfig):
             return self._do_compute_annotation(cls, self.get_registered_ttc_strategies())
+
+        if issubclass(cls, MiddlewareBaseConfig):
+            return self._do_compute_annotation(cls, self.get_registered_middleware())
 
         raise ValueError(f"Supplied an unsupported component type {cls}")
 

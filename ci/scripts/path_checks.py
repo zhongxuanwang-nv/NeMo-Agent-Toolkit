@@ -49,7 +49,7 @@ ALLOWLISTED_FILE_PATH_PAIRS: set[tuple[str, str]] = {
         r"^examples/evaluation_and_profiling/simple_web_query_eval/data/langsmith.json",
     ),
     (
-        r"^examples/evaluation_and_profiling/email_phishing_analyzer/configs",
+        r"^examples/evaluation_and_profiling/email_phishing_analyzer/.*/configs",
         r"^examples/evaluation_and_profiling/email_phishing_analyzer/data",
     ),
     (
@@ -96,6 +96,7 @@ ALLOWLISTED_FILE_PATH_PAIRS: set[tuple[str, str]] = {
 }
 
 ALLOWLISTED_WORDS: set[str] = {
+    "A/B",
     "and/or",
     "application/json",
     "CI/CD",
@@ -104,17 +105,23 @@ ALLOWLISTED_WORDS: set[str] = {
     "conversation/chat",
     "create/reinstall/delete",
     "copy/paste",
+    "delete/recreate",
     "edit/score",
     "file/console",
     "files/functions",
     "I/O",
+    "include/exclude",
     "Input/Observation",
     "input/output",
     "inputs/outputs",
+    "Input/output",
     "JavaScript/TypeScript",
     "JSON/YAML",
+    "LangChain/LangGraph",
+    "LangChain/LangGraph.",
     "LTE/5G",
     "output/jobs/job_",
+    "POST/PUT",
     "predictions/forecasts",
     "provider/method.",
     "RagaAI/Catalyst",
@@ -143,7 +150,8 @@ ALLOWLISTED_WORDS: set[str] = {
     "nvidia/([Ll]lama|[Nn][Vv]-).*",
     "mistralai/[Mm]ixtral.*",
     "microsoft/[Pp]hi.*",
-    "ssmits/[Qq]wen.*",  #
+    "ssmits/[Qq]wen.*",
+    "deepseek-ai/deepseek-.*",  #
     # MIME types
     "(application|text|image|video|audio|model|dataset|token|other)/.*",  #
     # Time zones
@@ -159,8 +167,12 @@ IGNORED_FILE_PATH_PAIRS: set[tuple[str, str]] = {
     ),
     # ignore notebook-relative paths
     (
-        r"^examples/notebooks/retail_sales_agent/.*configs/",
-        r"^\./retail_sales_agent/data/",
+        r"^examples/notebooks/",
+        r".*(configs|data|src).*",
+    ),
+    (
+        r"^examples/frameworks/haystack_deep_research_agent/README.md",
+        r"^examples/frameworks/haystack_deep_research_agent/data/bedrock-ug.pdf",
     ),
     # ignore generated files
     (
@@ -273,7 +285,7 @@ def extract_paths_from_file(filename: str) -> list[PathInfo]:
         A list of PathInfo objects.
     """
     paths = []
-    with open(filename, "r", encoding="utf-8") as f:
+    with open(filename, encoding="utf-8") as f:
         section: list[str] = []
         in_skipped_section: bool = False
         skip_next_line: bool = False

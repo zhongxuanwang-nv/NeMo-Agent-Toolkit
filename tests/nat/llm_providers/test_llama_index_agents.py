@@ -91,7 +91,7 @@ async def test_openai_minimal_agent():
 @pytest.mark.usefixtures("aws_keys")
 async def test_aws_bedrock_minimal_agent():
     """
-    Test AWS Bedrock LLM with LangChain agent.
+    Test AWS Bedrock LLM with LangChain/LangGraph agent.
     Requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY to be set.
     See https://docs.aws.amazon.com/bedrock/latest/userguide/setting-up.html for more information.
     """
@@ -110,14 +110,22 @@ async def test_aws_bedrock_minimal_agent():
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("azure_openai_keys")
-async def test_azure_openai_minimal_agent():
+@pytest.mark.parametrize("api_version", [None, '2025-04-01-preview'])
+async def test_azure_openai_minimal_agent(api_version: str | None):
     """
     Test Azure OpenAI LLM with minimal LlamaIndex agent.
     Requires AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT to be set.
     The model can be changed by setting AZURE_OPENAI_DEPLOYMENT.
     See https://learn.microsoft.com/en-us/azure/ai-foundry/openai/quickstart for more information.
     """
-    llm_config = AzureOpenAIModelConfig(azure_deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1"))
+    config_args = {
+        "azure_deployment": os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1"),
+        "azure_endpoint": os.environ.get("AZURE_OPENAI_ENDPOINT"),
+        "api_key": os.environ.get("AZURE_OPENAI_API_KEY")
+    }
+    if api_version is not None:
+        config_args["api_version"] = api_version
+    llm_config = AzureOpenAIModelConfig(**config_args)
     agent = await create_minimal_agent("azure_openai_llm", llm_config)
 
     response = await agent.achat("What is 1+2?")

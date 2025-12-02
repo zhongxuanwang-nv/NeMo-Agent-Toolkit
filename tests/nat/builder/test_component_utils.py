@@ -82,12 +82,12 @@ def nested_nat_config_fixture():
         if config.embedder_name is not None:
             await builder.get_embedder(embedder_name=config.embedder_name, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
         if config.object_store_name is not None:
-            await builder.get_object_store(object_store_name=config.object_store_name)
+            await builder.get_object_store_client(object_store_name=config.object_store_name)
         if config.retriever_name is not None:
             await builder.get_retriever(retriever_name=config.retriever_name, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
 
         for fn_name in config.fn_names:
-            builder.get_function(name=fn_name)
+            await builder.get_function(name=fn_name)
 
         async def _inner_func(fn_input: str) -> str:
             return ""
@@ -256,7 +256,7 @@ def test_recursive_componentref_discovery():
         expected_instance_id = generate_instance_id(instance_config)
 
         result_set = set()
-        for field_name, field_info in instance_config.model_fields.items():
+        for field_name, field_info in TestConfig.model_fields.items():
 
             for instance_id, value_node in recursive_componentref_discovery(
                     instance_config,
@@ -433,4 +433,4 @@ async def test_load_hierarchial_workflow(nested_nat_config: Config):
 
     # Validate nested workflow instantiation
     async with WorkflowBuilder.from_config(config=nested_nat_config) as workflow:
-        assert SessionManager(workflow.build(), max_concurrency=1)
+        assert SessionManager(await workflow.build(), max_concurrency=1)

@@ -26,6 +26,7 @@ from pydantic import FilePath
 from pydantic import Tag
 
 from nat.data_models.common import BaseModelRegistryTag
+from nat.data_models.common import SerializableSecretStr
 from nat.data_models.common import TypedBaseModel
 
 
@@ -34,8 +35,8 @@ class EvalS3Config(BaseModel):
     endpoint_url: str | None = None
     region_name: str | None = None
     bucket: str
-    access_key: str
-    secret_key: str
+    access_key: SerializableSecretStr
+    secret_key: SerializableSecretStr
 
 
 class EvalFilterEntryConfig(BaseModel):
@@ -80,7 +81,7 @@ class EvalDatasetJsonConfig(EvalDatasetBaseConfig, name="json"):
 
 
 def read_jsonl(file_path: FilePath):
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         data = [json.loads(line) for line in f]
     return pd.DataFrame(data)
 

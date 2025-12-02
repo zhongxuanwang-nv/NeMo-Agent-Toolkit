@@ -41,6 +41,14 @@ class LambdaStreamFnConfig(FunctionBaseConfig, name="test_lambda_stream"):
     pass
 
 
+class OrderedMiddlewareConfig(FunctionBaseConfig, name="test_ordered_middleware"):
+    pass
+
+
+class FinalMiddlewareConfig(FunctionBaseConfig, name="test_final_middleware"):
+    pass
+
+
 @pytest.fixture(scope="module", autouse=True)
 async def _register_lambda_fn():
 
@@ -125,7 +133,7 @@ async def test_functions_call_functions():
     @register_function(config_type=ChainedFnConfig)
     async def _register(config: ChainedFnConfig, b: Builder):
 
-        other_fn = b.get_function(config.function_name)
+        other_fn = await b.get_function(config.function_name)
 
         async def _inner(some_input: str) -> str:
             return await other_fn.ainvoke(some_input, to_type=str) + "!"

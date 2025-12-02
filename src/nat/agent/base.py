@@ -27,9 +27,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.messages import BaseMessage
 from langchain_core.messages import ToolMessage
+from langchain_core.runnables import Runnable
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from langgraph.graph.graph import CompiledGraph
+from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
 
@@ -101,27 +102,31 @@ class BaseAgent(ABC):
         AIMessage
             The LLM response
         """
-        output_message = ""
+        output_message = []
         async for event in runnable.astream(inputs, config=config):
-            output_message += event.content
+            output_message.append(event.content)
 
-        return AIMessage(content=output_message)
+        return AIMessage(content="".join(output_message))
 
-    async def _call_llm(self, messages: list[BaseMessage]) -> AIMessage:
+    async def _call_llm(self, llm: Runnable, inputs: dict[str, Any], config: RunnableConfig | None = None) -> AIMessage:
         """
         Call the LLM directly. Retry logic is handled automatically by the underlying LLM client.
 
         Parameters
         ----------
-        messages : list[BaseMessage]
-            The messages to send to the LLM
+        llm : Runnable
+            The LLM runnable (prompt | llm or similar)
+        inputs : dict[str, Any]
+            The inputs to pass to the runnable
+        config : RunnableConfig | None
+            The config to pass to the runnable (should include callbacks)
 
         Returns
         -------
         AIMessage
             The LLM response
         """
-        response = await self.llm.ainvoke(messages)
+        response = await llm.ainvoke(inputs, config=config)
         return AIMessage(content=str(response.content))
 
     async def _call_tool(self,
@@ -187,7 +192,7 @@ class BaseAgent(ABC):
                 await asyncio.sleep(sleep_time)
 
         # All retries exhausted, return error message
-        error_content = "Tool call failed after all retry attempts. Last error: %s" % str(last_exception)
+        error_content = f"Tool call failed after all retry attempts. Last error: {str(last_exception)}"
         logger.error("%s %s", AGENT_LOG_PREFIX, error_content, exc_info=True)
         return ToolMessage(name=tool.name, tool_call_id=tool.name, content=error_content, status="error")
 
@@ -256,5 +261,5 @@ class BaseAgent(ABC):
         return "\n".join([f"{message.type}: {message.content}" for message in messages[:-1]])
 
     @abstractmethod
-    async def _build_graph(self, state_schema: type) -> CompiledGraph:
+    async def _build_graph(self, state_schema: type) -> CompiledStateGraph:
         pass

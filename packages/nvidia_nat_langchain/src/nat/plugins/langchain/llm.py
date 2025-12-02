@@ -12,25 +12,32 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# pylint: disable=unused-argument
 
+import logging
 from collections.abc import Sequence
 from typing import TypeVar
 
 from nat.builder.builder import Builder
 from nat.builder.framework_enum import LLMFrameworkEnum
 from nat.cli.register_workflow import register_llm_client
+from nat.data_models.llm import APITypeEnum
 from nat.data_models.llm import LLMBaseConfig
 from nat.data_models.retry_mixin import RetryMixin
 from nat.data_models.thinking_mixin import ThinkingMixin
 from nat.llm.aws_bedrock_llm import AWSBedrockModelConfig
 from nat.llm.azure_openai_llm import AzureOpenAIModelConfig
+from nat.llm.litellm_llm import LiteLlmModelConfig
 from nat.llm.nim_llm import NIMModelConfig
 from nat.llm.openai_llm import OpenAIModelConfig
 from nat.llm.utils.thinking import BaseThinkingInjector
 from nat.llm.utils.thinking import FunctionArgumentWrapper
 from nat.llm.utils.thinking import patch_with_thinking
 from nat.utils.exception_handlers.automatic_retries import patch_with_retry
+from nat.utils.responses_api import validate_no_responses_api
 from nat.utils.type_utils import override
+
+logger = logging.getLogger(__name__)
 
 ModelType = TypeVar("ModelType")
 
@@ -64,20 +71,22 @@ def _patch_llm_based_on_config(client: ModelType, llm_config: LLMBaseConfig) -> 
             Raises:
                 ValueError: If the messages are not a valid type for LanguageModelInput.
             """
-            system_message = SystemMessage(content=self.system_prompt)
-            if isinstance(messages, BaseMessage):
-                new_messages = [system_message, messages]
-                return FunctionArgumentWrapper(new_messages, *args, **kwargs)
-            elif isinstance(messages, PromptValue):
-                new_messages = [system_message, *messages.to_messages()]
-                return FunctionArgumentWrapper(new_messages, *args, **kwargs)
+            if isinstance(messages, PromptValue):
+                messages = messages.to_messages()
             elif isinstance(messages, str):
-                new_messages = [system_message, HumanMessage(content=messages)]
-                return FunctionArgumentWrapper(new_messages, *args, **kwargs)
-            elif isinstance(messages, Sequence):
-                if all(isinstance(m, BaseMessage) for m in messages):
-                    new_messages = [system_message, *list(messages)]
-                    return FunctionArgumentWrapper(new_messages, *args, **kwargs)
+                messages = [HumanMessage(content=messages)]
+
+            if isinstance(messages, Sequence) and all(isinstance(m, BaseMessage) for m in messages):
+                for i, message in enumerate(messages):
+                    if isinstance(message, SystemMessage):
+                        if self.system_prompt not in str(message.content):
+                            messages = list(messages)
+                            messages[i] = SystemMessage(content=f"{message.content}\n{self.system_prompt}")
+                        break
+                else:
+                    messages = list(messages)
+                    messages.insert(0, SystemMessage(content=self.system_prompt))
+                return FunctionArgumentWrapper(messages, *args, **kwargs)
             raise ValueError(f"Unsupported message type: {type(messages)}")
 
     if isinstance(llm_config, RetryMixin):
@@ -107,7 +116,14 @@ async def aws_bedrock_langchain(llm_config: AWSBedrockModelConfig, _builder: Bui
 
     from langchain_aws import ChatBedrockConverse
 
-    client = ChatBedrockConverse(**llm_config.model_dump(exclude={"type", "context_size", "thinking"}, by_alias=True))
+    validate_no_responses_api(llm_config, LLMFrameworkEnum.LANGCHAIN)
+
+    client = ChatBedrockConverse(**llm_config.model_dump(
+        exclude={"type", "context_size", "thinking", "api_type"},
+        by_alias=True,
+        exclude_none=True,
+        exclude_unset=True,
+    ))
 
     yield _patch_llm_based_on_config(client, llm_config)
 
@@ -117,7 +133,15 @@ async def azure_openai_langchain(llm_config: AzureOpenAIModelConfig, _builder: B
 
     from langchain_openai import AzureChatOpenAI
 
-    client = AzureChatOpenAI(**llm_config.model_dump(exclude={"type", "thinking"}, by_alias=True))
+    validate_no_responses_api(llm_config, LLMFrameworkEnum.LANGCHAIN)
+
+    client = AzureChatOpenAI(
+        **llm_config.model_dump(exclude={"type", "thinking", "api_type", "api_version"},
+                                by_alias=True,
+                                exclude_none=True,
+                                exclude_unset=True),
+        api_version=llm_config.api_version,
+    )
 
     yield _patch_llm_based_on_config(client, llm_config)
 
@@ -127,9 +151,16 @@ async def nim_langchain(llm_config: NIMModelConfig, _builder: Builder):
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
+    validate_no_responses_api(llm_config, LLMFrameworkEnum.LANGCHAIN)
+
     # prefer max_completion_tokens over max_tokens
     client = ChatNVIDIA(
-        **llm_config.model_dump(exclude={"type", "max_tokens", "thinking"}, by_alias=True),
+        **llm_config.model_dump(
+            exclude={"type", "max_tokens", "thinking", "api_type"},
+            by_alias=True,
+            exclude_none=True,
+            exclude_unset=True,
+        ),
         max_completion_tokens=llm_config.max_tokens,
     )
 
@@ -141,7 +172,37 @@ async def openai_langchain(llm_config: OpenAIModelConfig, _builder: Builder):
 
     from langchain_openai import ChatOpenAI
 
-    # If stream_usage is specified, it will override the default value of True.
-    client = ChatOpenAI(stream_usage=True, **llm_config.model_dump(exclude={"type", "thinking"}, by_alias=True))
+    if llm_config.api_type == APITypeEnum.RESPONSES:
+        client = ChatOpenAI(stream_usage=True,
+                            use_responses_api=True,
+                            use_previous_response_id=True,
+                            **llm_config.model_dump(
+                                exclude={"type", "thinking", "api_type"},
+                                by_alias=True,
+                                exclude_none=True,
+                                exclude_unset=True,
+                            ))
+    else:
+        # If stream_usage is specified, it will override the default value of True.
+        client = ChatOpenAI(stream_usage=True,
+                            **llm_config.model_dump(
+                                exclude={"type", "thinking", "api_type"},
+                                by_alias=True,
+                                exclude_none=True,
+                                exclude_unset=True,
+                            ))
+
+    yield _patch_llm_based_on_config(client, llm_config)
+
+
+@register_llm_client(config_type=LiteLlmModelConfig, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
+async def litellm_langchain(llm_config: LiteLlmModelConfig, _builder: Builder):
+
+    from langchain_litellm import ChatLiteLLM
+
+    validate_no_responses_api(llm_config, LLMFrameworkEnum.LANGCHAIN)
+
+    client = ChatLiteLLM(**llm_config.model_dump(
+        exclude={"type", "thinking", "api_type"}, by_alias=True, exclude_none=True, exclude_unset=True))
 
     yield _patch_llm_based_on_config(client, llm_config)

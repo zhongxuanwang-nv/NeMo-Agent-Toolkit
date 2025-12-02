@@ -20,6 +20,7 @@ from pydantic import Field
 
 from nat.builder.builder import Builder
 from nat.cli.register_workflow import register_object_store
+from nat.data_models.common import OptionalSecretStr
 from nat.data_models.object_store import ObjectStoreBaseConfig
 
 
@@ -33,10 +34,10 @@ class S3ObjectStoreClientConfig(ObjectStoreBaseConfig, name="s3"):
 
     bucket_name: str = Field(..., description="The name of the bucket to use for the object store")
     endpoint_url: str | None = Field(default=None, description="The URL of the S3 server to connect to")
-    access_key: str | None = Field(default=os.environ.get(ACCESS_KEY_ENV),
-                                   description=f"Access key. If omitted, reads from {ACCESS_KEY_ENV}")
-    secret_key: str | None = Field(default=os.environ.get(SECRET_KEY_ENV),
-                                   description=f"Secret key. If omitted, reads from {SECRET_KEY_ENV}")
+    access_key: OptionalSecretStr = Field(default=os.environ.get(ACCESS_KEY_ENV),
+                                          description=f"Access key. If omitted, reads from {ACCESS_KEY_ENV}")
+    secret_key: OptionalSecretStr = Field(default=os.environ.get(SECRET_KEY_ENV),
+                                          description=f"Secret key. If omitted, reads from {SECRET_KEY_ENV}")
     region: str | None = Field(default=None, description="Region to access (or none if unspecified)")
 
 
@@ -45,5 +46,5 @@ async def s3_object_store_client(config: S3ObjectStoreClientConfig, _builder: Bu
 
     from .s3_object_store import S3ObjectStore
 
-    async with S3ObjectStore(**config.model_dump(exclude={"type"}, exclude_none=True)) as store:
+    async with S3ObjectStore(**config.model_dump(exclude={"type"}, exclude_none=False)) as store:
         yield store

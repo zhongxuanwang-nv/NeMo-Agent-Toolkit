@@ -74,7 +74,7 @@ async def test_llm_provider(config: TestLLMConfig, builder: Builder):
 
 @register_llm_client(config_type=TestLLMConfig, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
 async def test_llm_langchain(config: TestLLMConfig, builder: Builder):
-    """LLM client for LangChain."""
+    """LLM client for LangChain/LangGraph."""
 
     chooser = _ResponseChooser(response_seq=config.response_seq, delay_ms=config.delay_ms)
 
@@ -95,6 +95,14 @@ async def test_llm_langchain(config: TestLLMConfig, builder: Builder):
         async def astream(self, messages: Any, **_kwargs: Any) -> AsyncGenerator[str]:
             await chooser.async_sleep()
             yield chooser.next_response()
+
+        def bind_tools(self, tools: Any, **_kwargs: Any) -> "LangChainTestLLM":
+            """Bind tools to the LLM. Returns self to maintain fluent interface."""
+            return self
+
+        def bind(self, **_kwargs: Any) -> "LangChainTestLLM":
+            """Bind additional parameters to the LLM. Returns self to maintain fluent interface."""
+            return self
 
     yield LangChainTestLLM()
 
@@ -203,3 +211,34 @@ async def test_llm_agno(config: TestLLMConfig, builder: Builder):
             yield chooser.next_response()
 
     yield AgnoTestLLM()
+
+
+@register_llm_client(config_type=TestLLMConfig, wrapper_type=LLMFrameworkEnum.ADK)
+async def test_llm_adk(config: TestLLMConfig, builder: Builder):
+    """LLM client for Google ADK."""
+
+    try:
+        from google.adk.models.base_llm import BaseLlm
+        from google.adk.models.llm_request import LlmRequest
+        from google.adk.models.llm_response import LlmResponse
+        from google.genai import types
+    except ImportError as exc:
+        raise ImportError("Google ADK is required for using the test_llm with ADK. "
+                          "Please install the `nvidia-nat-adk` package. ") from exc
+
+    chooser = _ResponseChooser(response_seq=config.response_seq, delay_ms=config.delay_ms)
+
+    class ADKTestLLM(BaseLlm):
+
+        async def generate_content_async(self,
+                                         llm_request: LlmRequest,
+                                         stream: bool = False) -> AsyncGenerator[LlmResponse, None]:
+            self._maybe_append_user_content(llm_request)
+            await chooser.async_sleep()
+            text = chooser.next_response()
+            yield LlmResponse(content=types.Content(role="model", parts=[types.Part.from_text(text=text)]))
+
+        def connect(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    yield ADKTestLLM(model="nat_test_llm")

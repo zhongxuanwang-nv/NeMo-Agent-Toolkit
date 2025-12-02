@@ -13,33 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import importlib
-import importlib.resources
-import inspect
-import logging
 from pathlib import Path
 
 import pytest
 
-from nat.runtime.loader import load_workflow
-from nat_agno_personal_finance.agno_personal_finance_function import AgnoPersonalFinanceFunctionConfig
 
-logger = logging.getLogger(__name__)
-
-
-@pytest.mark.e2e
+@pytest.mark.integration
+@pytest.mark.usefixtures("serp_api_key", "openai_api_key")
 async def test_full_workflow():
+    from nat.test.utils import locate_example_config
+    from nat.test.utils import run_workflow
+    from nat_agno_personal_finance.agno_personal_finance_function import AgnoPersonalFinanceFunctionConfig
 
-    package_name = inspect.getmodule(AgnoPersonalFinanceFunctionConfig).__package__
+    config_file: Path = locate_example_config(AgnoPersonalFinanceFunctionConfig)
 
-    config_file: Path = importlib.resources.files(package_name).joinpath("configs", "config.yml").absolute()
-
-    async with load_workflow(config_file) as workflow:
-
-        async with workflow.run("My financial goal is to retire at age 50. "
-                                "I am currently 30 years old, working as a Solutions Architect at NVIDIA.") as runner:
-
-            result = await runner.result(to_type=str)
-
-        result = result.lower()
-        assert "personalized financial plan" in result
+    await run_workflow(config_file=config_file,
+                       question=("My financial goal is to retire at age 50. "
+                                 "I am currently 30 years old, working as a Solutions Architect at NVIDIA."),
+                       expected_answer="financial plan")

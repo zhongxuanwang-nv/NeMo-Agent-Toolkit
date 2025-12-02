@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import logging
 import typing
 
@@ -24,6 +25,7 @@ from nat.cli.register_workflow import register_function
 from nat.data_models.component_ref import LLMRef
 from nat.data_models.function import FunctionBaseConfig
 from nat.profiler.decorators.function_tracking import track_function
+from nat.data_models.optimizable import OptimizableMixin
 
 # flake8: noqa
 # Import any tools which need to be automatically registered here
@@ -42,7 +44,7 @@ from .classification_evaluator import register_classification_evaluator
 from .prompts import ALERT_TRIAGE_AGENT_PROMPT
 
 
-class AlertTriageAgentWorkflowConfig(FunctionBaseConfig, name="alert_triage_agent"):
+class AlertTriageAgentWorkflowConfig(FunctionBaseConfig, OptimizableMixin, name="alert_triage_agent"):
     """
     Configuration for the Alert Triage Agent workflow. This agent orchestrates multiple diagnostic tools
     to analyze and triage alerts by:
@@ -53,7 +55,7 @@ class AlertTriageAgentWorkflowConfig(FunctionBaseConfig, name="alert_triage_agen
     """
     tool_names: list[str] = []
     llm_name: LLMRef
-    offline_mode: bool = Field(default=True, description="Whether to run in offline model")
+    offline_mode: bool = Field(default=True, description="Whether to run in offline mode")
     offline_data_path: str | None = Field(
         default="examples/advanced_agents/alert_triage_agent/data/offline_data.csv",
         description="Path to the main offline dataset in CSV format containing alerts and their simulated environments")
@@ -81,14 +83,16 @@ async def alert_triage_agent_workflow(config: AlertTriageAgentWorkflowConfig, bu
 
     # Get tools for alert triage
     tool_names = config.tool_names
-    tools = []
-    for tool_name in tool_names:
-        tool = builder.get_tool(tool_name, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
-        tools.append(tool)
+
+    async def _get_tool(tool_name: str):
+        return await builder.get_tool(tool_name, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
+
+    tools = [_get_tool(tool_name) for tool_name in tool_names]
+    tools = await asyncio.gather(*tools)
     llm_n_tools = llm.bind_tools(tools, parallel_tool_calls=True)
 
-    categorizer_tool = builder.get_tool("categorizer", wrapper_type=LLMFrameworkEnum.LANGCHAIN)
-    maintenance_check_tool = builder.get_tool("maintenance_check", wrapper_type=LLMFrameworkEnum.LANGCHAIN)
+    categorizer_tool = await _get_tool("categorizer")
+    maintenance_check_tool = await _get_tool("maintenance_check")
 
     # Define assistant function that processes messages with the LLM
     async def ata_assistant(state: MessagesState):
@@ -101,7 +105,7 @@ async def alert_triage_agent_workflow(config: AlertTriageAgentWorkflowConfig, bu
     builder_graph = StateGraph(MessagesState)
 
     # Get tools specified in config
-    tools = builder.get_tools(config.tool_names, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
+    tools = await builder.get_tools(config.tool_names, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
 
     # Add nodes to graph
     builder_graph.add_node("ata_assistant", ata_assistant)
